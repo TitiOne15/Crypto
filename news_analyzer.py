@@ -72,3 +72,47 @@ def run_analysis(self):
         logging.info("Aucune alerte à envoyer")
     
     return analyzed_items
+
+def check_configuration(self):
+    """Vérifie la configuration du système"""
+    checks = {
+        "Configuration Telegram": self.test_telegram(),
+        "API Twitter": self.test_twitter(),
+        "Accès au cache": self.test_cache(),
+        "APIs News": self.test_news_apis()
+    }
+    
+    all_ok = all(checks.values())
+    if not all_ok:
+        logging.error("Problèmes de configuration détectés:")
+        for check, status in checks.items():
+            if not status:
+                logging.error(f"- {check}: ÉCHEC")
+    return all_ok
+
+def test_telegram(self):
+    try:
+        telegram_send.send(messages=["Test de configuration"])
+        return True
+    except Exception as e:
+        logging.error(f"Erreur Telegram: {e}")
+        return False
+
+def test_twitter(self):
+    return bool(os.getenv('TWITTER_API_KEY')) and bool(os.getenv('TWITTER_API_SECRET'))
+
+def test_cache(self):
+    try:
+        self.save_cache()
+        return True
+    except Exception as e:
+        logging.error(f"Erreur cache: {e}")
+        return False
+
+def test_news_apis(self):
+    try:
+        response = requests.get('https://api.coingecko.com/api/v3/ping')
+        return response.status_code == 200
+    except Exception as e:
+        logging.error(f"Erreur API news: {e}")
+        return False
