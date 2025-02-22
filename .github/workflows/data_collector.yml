@@ -17,12 +17,18 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
-          python-version: '3.9'  # Choisis ta version
+          python-version: '3.12.5'  # Choisis ta version
 
       - name: Install dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
+
+      - name: Run data collector
+        run: |
+          export BINANCE_API_KEY=${{ secrets.BINANCE_API_KEY }}
+          export BINANCE_API_SECRET=${{ secrets.BINANCE_API_SECRET }}
+          python data_collector.py
       
       - name: Run data collector
         run: |
