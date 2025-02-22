@@ -9,8 +9,8 @@ from datetime import datetime
 
 # Initialiser l'exchange
 load_dotenv()
-API_KEY = os.getenv('API_KEY')
-API_SECRET = os.getenv('API_SECRET')
+API_KEY = os.getenv('BINANCE_API_KEY')
+API_SECRET = os.getenv('BINANCE_API_SECRET')
 
 binance = ccxt.binance({
     'apiKey': API_KEY,
