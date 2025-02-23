@@ -51,6 +51,6 @@ df.set_index('timestamp', inplace=True)
 df.sort_index(inplace=True)  # s'assurer que c'est dans l'ordre
 
 #%% Sauvegarder
-df.to_parquet('../data/ETH_USDT_1h_raw.parquet')
+df.to_parquet('./data/ETH_USDT_1h_raw.parquet')
 
 # %%
