@@ -11,7 +11,7 @@ API_URL = "https://api.coingecko.com/api/v3/coins/ethereum/market_chart"
 # Paramètres pour obtenir l'historique complet ("max") à un intervalle "hourly"
 params = {
     "vs_currency": "usd",
-    "days": "90",       # on veut l'historique complet
+    "days": 90,       # on veut l'historique complet
     "interval": "hourly" # on veut une granularité horaire
 }
 
