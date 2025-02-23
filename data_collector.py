@@ -90,7 +90,7 @@ def get_hourly_data_coingecko(
 if __name__ == "__main__":
 
     # Exemple : de 2016-01-01 à 2021-01-01 en hourly
-    df = get_hourly_data_coingecko("2016-01-01", "2021-01-01")
+    df = get_hourly_data_coingecko("2025-01-01", "2025-02-23")
 
     print(df.head(), df.tail(), df.shape)
 
