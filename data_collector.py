@@ -1,56 +1,65 @@
-#%% Récupérer l'historique
+# data_collector.py
 
-from dotenv import load_dotenv
-import os
-import ccxt
+import requests
 import pandas as pd
-import time
+import os
 from datetime import datetime
 
-# Initialiser l'exchange
-load_dotenv()
-API_KEY = os.getenv('BINANCE_API_KEY')
-API_SECRET = os.getenv('BINANCE_API_SECRET')
+# CoinGecko API pour récupérer l'historique de prix de l'Ethereum (ETH) en USD
+API_URL = "https://api.coingecko.com/api/v3/coins/ethereum/market_chart"
 
-binance = ccxt.binance({
-    'apiKey': API_KEY,
-    'secret': API_SECRET,
-    'enableRateLimit': True
-})
+# Paramètres pour obtenir l'historique complet ("max") à un intervalle "hourly"
+params = {
+    "vs_currency": "usd",
+    "days": "max",         # 'max' = historique le plus long possible (démarre en 2015-2016)
+    "interval": "hourly"   # granularité horaire
+}
 
-# Définir la paire de trading et le timeframe
-symbol = 'ETH/USDT'
-timeframe = '1h'
+print("Fetching hourly ETH data from CoinGecko...")
+response = requests.get(API_URL, params=params)
+if response.status_code != 200:
+    raise Exception(f"HTTP Error {response.status_code} - {response.text}")
 
-# Récupérer l'historique
-ohlcv_data = binance.fetch_ohlcv(symbol, timeframe=timeframe, limit=1000)
+data = response.json()
 
-all_data = []
-# Par exemple, démarrer à une date précise (2020-01-01) convertie en timestamp
-since = binance.parse8601('2020-01-01T00:00:00Z')
+# data['prices'] = liste de [ [timestamp_ms, prix], ... ]
+prices = data.get("prices", [])          # prix
+volumes = data.get("total_volumes", [])  # volumes (en USD)
 
-while True:
-    ohlcv = binance.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=1000)
-    if not ohlcv:
-        break  # si plus de data, on s'arrête
-    
-    all_data += ohlcv
-    # Avancer le 'since' : on prend le dernier timestamp récupéré + 1 ms
-    since = ohlcv[-1][0] + 1
+if not prices:
+    raise Exception("No price data returned by CoinGecko.")
 
-    # Optionnel : faire une pause pour respecter les rate limits
-    time.sleep(1)
+# --- Convertir les données en DataFrame pour les prix ---
+df_price = pd.DataFrame(prices, columns=["timestamp_ms", "price"])
+df_price["timestamp"] = pd.to_datetime(df_price["timestamp_ms"], unit="ms", utc=True)
+df_price.set_index("timestamp", inplace=True)
+df_price.sort_index(inplace=True)
 
-# Convertir en DataFrame  
-columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-df = pd.DataFrame(all_data, columns=columns)
+# --- Convertir les données en DataFrame pour les volumes ---
+df_vol = pd.DataFrame(volumes, columns=["timestamp_ms", "volume"])
+df_vol["timestamp"] = pd.to_datetime(df_vol["timestamp_ms"], unit="ms", utc=True)
+df_vol.set_index("timestamp", inplace=True)
+df_vol.sort_index(inplace=True)
 
-# Convertir timestamp en datetime lisible
-df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
-df.set_index('timestamp', inplace=True)
-df.sort_index(inplace=True)  # s'assurer que c'est dans l'ordre
+# Joindre les deux (sur l’index = timestamp)
+df = df_price.join(df_vol[["volume"]], how="outer")
 
-#%% Sauvegarder
-df.to_parquet('./data/ETH_USDT_1h_raw.parquet')
+# CoinGecko ne donne qu'un point de prix par heure → On utilise la même valeur pour open/high/low/close
+df["open"] = df["price"]
+df["high"] = df["price"]
+df["low"] = df["price"]
+df["close"] = df["price"]
 
-# %%
+# Réorganiser les colonnes pour un format OHLCV standard
+df = df[["open", "high", "low", "close", "volume"]]
+
+# Optionnel : On peut renommer la colonne volume pour clarifier qu'il s'agit d'un "volume en USD"
+# df.rename(columns={"volume": "volume_usd"}, inplace=True)
+
+# --- Sauvegarde en Parquet (ou CSV) ---
+os.makedirs("data", exist_ok=True)  # Crée le dossier 'data' si inexistant
+output_path = "./data/ETH_USDT_1h_raw.parquet"
+df.to_parquet(output_path)
+
+print(f"Data collected and saved to {output_path}")
+print(df.tail())  # Afficher quelques dernières lignes pour vérifier
