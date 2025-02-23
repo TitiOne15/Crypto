@@ -1,65 +1,98 @@
-# data_collector.py
-
 import requests
 import pandas as pd
-import os
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 
-# CoinGecko API pour récupérer l'historique de prix de l'Ethereum (ETH) en USD
-API_URL = "https://api.coingecko.com/api/v3/coins/ethereum/market_chart"
+def get_hourly_data_coingecko(
+    start_date: str = "2016-01-01", 
+    end_date: str   = "2025-01-01"
+):
+    """
+    Récupère de l'historique horaire ETH depuis start_date jusqu'à end_date,
+    en découpant la période en segments de 90 jours pour respecter les limites de l'API.
+    start_date et end_date au format 'YYYY-MM-DD'.
+    """
+    # Convertir en timestamps UNIX (secondes)
+    start_ts = int(pd.to_datetime(start_date).timestamp())
+    end_ts   = int(pd.to_datetime(end_date).timestamp())
 
-# Paramètres pour obtenir l'historique complet ("max") à un intervalle "hourly"
-params = {
-    "vs_currency": "usd",
-    "days": 90,       # on veut l'historique complet
-    "interval": "hourly" # on veut une granularité horaire
-}
+    # Nombre de jours entre start_date et end_date
+    total_days = (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days
 
-print("Fetching hourly ETH data from CoinGecko...")
-response = requests.get(API_URL, params=params)
-if response.status_code != 200:
-    raise Exception(f"HTTP Error {response.status_code} - {response.text}")
+    # Avance par segments de 90 jours max
+    chunk_size = 90
+    df_list = []
 
-data = response.json()
+    current_start = start_ts
+    while True:
+        # Déterminer la date de fin du chunk (90 jours plus tard ou end_date si on dépasse)
+        chunk_end = current_start + (chunk_size * 24 * 3600)
+        if chunk_end > end_ts:
+            chunk_end = end_ts
 
-# data['prices'] = liste de [ [timestamp_ms, prix], ... ]
-prices = data.get("prices", [])          # prix
-volumes = data.get("total_volumes", [])  # volumes (en USD)
+        print(f"Fetching chunk from {current_start} to {chunk_end}...")
 
-if not prices:
-    raise Exception("No price data returned by CoinGecko.")
+        # Appel API
+        url = "https://api.coingecko.com/api/v3/coins/ethereum/market_chart/range"
+        params = {
+            "vs_currency": "usd",
+            "from": current_start,
+            "to": chunk_end
+        }
 
-# --- Convertir les données en DataFrame pour les prix ---
-df_price = pd.DataFrame(prices, columns=["timestamp_ms", "price"])
-df_price["timestamp"] = pd.to_datetime(df_price["timestamp_ms"], unit="ms", utc=True)
-df_price.set_index("timestamp", inplace=True)
-df_price.sort_index(inplace=True)
+        r = requests.get(url, params=params)
+        if r.status_code != 200:
+            raise Exception(f"Error {r.status_code} - {r.text}")
 
-# --- Convertir les données en DataFrame pour les volumes ---
-df_vol = pd.DataFrame(volumes, columns=["timestamp_ms", "volume"])
-df_vol["timestamp"] = pd.to_datetime(df_vol["timestamp_ms"], unit="ms", utc=True)
-df_vol.set_index("timestamp", inplace=True)
-df_vol.sort_index(inplace=True)
+        data = r.json()
 
-# Joindre les deux (sur l’index = timestamp)
-df = df_price.join(df_vol[["volume"]], how="outer")
+        # Extraire 'prices' et 'total_volumes'
+        prices = data.get("prices", [])
+        volumes = data.get("total_volumes", [])
 
-# CoinGecko ne donne qu'un point de prix par heure → On utilise la même valeur pour open/high/low/close
-df["open"] = df["price"]
-df["high"] = df["price"]
-df["low"] = df["price"]
-df["close"] = df["price"]
+        # Conversion en DataFrame
+        df_price = pd.DataFrame(prices, columns=["timestamp_ms", "price"])
+        df_price["timestamp"] = pd.to_datetime(df_price["timestamp_ms"], unit="ms", utc=True)
+        df_price.set_index("timestamp", inplace=True)
 
-# Réorganiser les colonnes pour un format OHLCV standard
-df = df[["open", "high", "low", "close", "volume"]]
+        df_vol   = pd.DataFrame(volumes, columns=["timestamp_ms", "volume"])
+        df_vol["timestamp"] = pd.to_datetime(df_vol["timestamp_ms"], unit="ms", utc=True)
+        df_vol.set_index("timestamp", inplace=True)
 
-# Optionnel : On peut renommer la colonne volume pour clarifier qu'il s'agit d'un "volume en USD"
-# df.rename(columns={"volume": "volume_usd"}, inplace=True)
+        df_merged = df_price.join(df_vol[["volume"]], how="outer")
+        df_merged.sort_index(inplace=True)
 
-# --- Sauvegarde en Parquet (ou CSV) ---
-os.makedirs("data", exist_ok=True)  # Crée le dossier 'data' si inexistant
-output_path = "./data/ETH_USDT_1h_raw.parquet"
-df.to_parquet(output_path)
+        df_list.append(df_merged)
 
-print(f"Data collected and saved to {output_path}")
-print(df.tail())  # Afficher quelques dernières lignes pour vérifier
+        # Arrêter si on a atteint la fin
+        if chunk_end >= end_ts:
+            break
+
+        # Passer au chunk suivant
+        current_start = chunk_end
+        time.sleep(1)  # Respecter un peu de délai pour éviter le rate limit
+
+    # Concaténer toutes les tranches
+    df_final = pd.concat(df_list)
+    df_final = df_final[~df_final.index.duplicated(keep='first')]  # enlever doublons éventuels
+
+    # Reconstruire OHLCV en assumant la même valeur pour open/high/low/close
+    df_final["open"]  = df_final["price"]
+    df_final["high"]  = df_final["price"]
+    df_final["low"]   = df_final["price"]
+    df_final["close"] = df_final["price"]
+
+    df_final = df_final[["open", "high", "low", "close", "volume"]]
+    df_final.sort_index(inplace=True)
+    return df_final
+
+
+if __name__ == "__main__":
+
+    # Exemple : de 2016-01-01 à 2021-01-01 en hourly
+    df = get_hourly_data_coingecko("2016-01-01", "2021-01-01")
+
+    print(df.head(), df.tail(), df.shape)
+
+    # Sauvegarde
+    df.to_csv("ETH_hourly_2016_2021.csv")
